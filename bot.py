@@ -3,7 +3,19 @@ import requests
 import time
 import ccxt
 import pandas as pd
-import numpy as np
+from flask import Flask
+import threading
+
+# إعداد سيرفر ويب وهمي لإرضاء متطلبات Render Web Service
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Binance Bot is running successfully!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 # ----------------------------
 # إعدادات متغيرات البيئة
@@ -29,24 +41,20 @@ def send_telegram_message(message):
         print(f"Error sending message: {e}")
 
 def calculate_indicators(df):
-    # حساب المتوسطات ومؤشرات العزم للتحليل
     df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     
-    # حساب MACD
     exp1 = df['close'].ewm(span=12, adjust=False).mean()
     exp2 = df['close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = exp1 - exp2
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     
-    # حساب RSI
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # حساب Stochastic (%K و %D)
     low_14 = df['low'].rolling(window=14).min()
     high_14 = df['high'].rolling(window=14).max()
     df['Stoch_K'] = (df['close'] - low_14) / (high_14 - low_14) * 100
@@ -62,14 +70,12 @@ def analyze_market():
     
     try:
         exchange.load_markets()
-        # نختار أهم العملات المقابلة لـ USDT لتخفيف الحمل وضمان السيولة
         symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT', 'AVAX/USDT', 'DOGE/USDT', 'LINK/USDT', 'DOT/USDT']
         
         send_telegram_message("🔍 *بدء دورة جديدة لفحص السوق واكتشاف الفرص...*")
         
         for symbol in symbols:
             try:
-                # جلب بيانات الشموع (فريم 4 ساعات أو ساعة)
                 ohlcv = exchange.fetch_ohlcv(symbol, timeframe='4h', limit=50)
                 if len(ohlcv) < 50:
                     continue
@@ -91,35 +97,22 @@ def analyze_market():
                 prev_stoch_k = df['Stoch_K'].iloc[-2]
                 prev_stoch_d = df['Stoch_D'].iloc[-2]
                 
-                # 1. التقاطع الإيجابي لمؤشر MACD و Stochastic
                 macd_bullish_cross = (prev_macd <= prev_macd_signal) and (macd > macd_signal)
                 stoch_bullish_cross = (prev_stoch_k <= prev_stoch_d) and (stoch_k > stoch_d)
-                
-                # 2. التشبع البيعي والسقوط الحر (RSI أقل من 30 مع محاولة ارتداد)
                 is_oversold = rsi < 30
-                
-                # 3. صندوق جان (أقرب أدنى مستوى في آخر 30 شمعة كمنطقة دعم رئيسية)
                 gann_box_low = df['low'].tail(30).min()
-                near_gann_low = current_close <= (gann_box_low * 1.01) # القريب من قاع الصندوق بنسبة 1%
-                
-                # 4. التجهيز لانفجار (تقارب الشموع / تقلب منخفض يسبق الحركة القوية + تقاطع إيجابي)
-                price_change_pct = ((current_close - prev_close) / prev_close) * 100
+                near_gann_low = current_close <= (gann_box_low * 1.01)
                 
                 alert_messages = []
-                
                 if macd_bullish_cross and stoch_bullish_cross:
                     alert_messages.append("⚡ *تقاطع إيجابي مزدوج (MACD + Stochastic)*")
-                
                 if is_oversold:
                     alert_messages.append(f"📉 *تشبع بيعي حاد وسقوط حر (RSI: {rsi:.1f})*")
-                    
                 if near_gann_low:
                     alert_messages.append(f"📦 *السعر وصل لأدنى مستوى في صندوق جان (الدعم: {gann_box_low})*")
-                    
                 if macd_bullish_cross and (current_close > df['EMA_20'].iloc[-1]):
                     alert_messages.append("🚀 *إشارة تجهيز لانفجار صعودي (Breakout Squeeze)*")
 
-                # إذا تحققت أي شروط إيجابية، أرسل التنبيه فوراً
                 if alert_messages:
                     msg = f"🚨 **تنبيه فرصة لعملة {symbol}** 🚨\n"
                     msg += f"💰 السعر الحالي: `{current_close}`\n"
@@ -127,24 +120,28 @@ def analyze_market():
                     msg += "الأسباب المكتشفة:\n" + "\n".join(alert_messages)
                     send_telegram_message(msg)
                 
-                time.sleep(1) # لتفادي الحظر من بينانس بسبب كثرة الطلبات
+                time.sleep(1)
             except Exception as e:
                 print(f"Error processing {symbol}: {e}")
                 
     except Exception as e:
         print(f"Error in market analysis: {e}")
 
-def main():
-    send_telegram_message("🤖 *تم تحديث بوت التداول بنجاح لراصد الفرص وانفجارات العملات!*")
-    
+def bot_loop():
+    send_telegram_message("🤖 *تم تفعيل بوت رصد الفرص وانفجارات العملات بنجاح تام!*")
     while True:
         try:
             analyze_market()
-            # الفحص كل ساعة لتوفير الموارد ومراقبة الإغلاقات بشكل دقيق
             time.sleep(3600) 
         except Exception as e:
             print(f"Error in main loop: {e}")
             time.sleep(60)
 
 if __name__ == "__main__":
-    main()
+    # تشغيل بوت التداول في خلفية مستقلة لكي لا يتعارض مع سيرفر الويب
+    t = threading.Thread(target=bot_loop)
+    t.daemon = True
+    t.start()
+    
+    # تشغيل سيرفر الويب ليظل الخدمة نشطة على Render
+    run_flask()
