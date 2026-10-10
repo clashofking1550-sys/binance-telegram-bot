@@ -5,8 +5,10 @@ import time
 import requests
 
 # ------------------- ضع معلوماتك هنا -------------------
-TELEGRAM_TOKEN = "8906463254:AAGvQkCDwcm89j5_Pi_acP1nF1MqsWzSZxI"
-TELEGRAM_CHAT_ID = "2063919632"
+import os
+
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 # ------------------------------------------------------
 
 # إعداد الاتصال بباينانس سبوت
